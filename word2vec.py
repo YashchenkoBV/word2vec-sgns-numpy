@@ -2,14 +2,16 @@
 
 import numpy as np
 
-# Vocabulary
+
+# ── Vocabulary ───────────────────────────────────────────────────────────
+
 def build_vocab(tokens, min_count=5):
-    """Return (word2id, id2word, counts) keeping only words with count >= min_count."""
+    """Return (word2id, id2word, counts) filtering words below min_count."""
     freq = {}
     for w in tokens:
         freq[w] = freq.get(w, 0) + 1
 
-    # Sort descending by count, then alphabetically
+    # Sort descending by count, then alphabetically for reproducibility.
     pairs = sorted(
         ((w, c) for w, c in freq.items() if c >= min_count),
         key=lambda wc: (-wc[1], wc[0]),
@@ -20,7 +22,9 @@ def build_vocab(tokens, min_count=5):
     counts = np.array([c for _, c in pairs], dtype=np.int64)
     return word2id, id2word, counts
 
-# Subsampling, using Mikolov's formula
+
+# ── Subsampling ──────────────────────────────────────────────────────────
+
 def subsample(token_ids: np.ndarray, counts, t=1e-5, rng=None):
     """Probabilistically discard frequent words.  P(keep) = sqrt(t / f(w))."""
     assert isinstance(token_ids, np.ndarray), "token_ids must be a numpy array"
@@ -30,7 +34,9 @@ def subsample(token_ids: np.ndarray, counts, t=1e-5, rng=None):
     mask = rng.random(len(token_ids)) < keep_prob[token_ids]
     return token_ids[mask]
 
-# Building unigram
+
+# ── Noise distribution ───────────────────────────────────────────────────
+
 def build_unigram_table(counts, exponent=0.75, table_size=10_000_000):
     """Flat lookup table for O(1) negative sampling.  p(w) ∝ count(w)^0.75."""
     powered = np.float64(counts) ** exponent
@@ -44,9 +50,11 @@ def sample_negatives(table, shape, rng):
     """Draw word ids from the noise table."""
     return table[rng.integers(0, len(table), size=shape)]
 
-# Corpus loading
+
+# ── Corpus loading ───────────────────────────────────────────────────────
+
 def load_corpus(path, min_count=5, subsample_t=1e-5, seed=42):
-    """Load text8-style corpus.  Returns (token_ids, word2id, id2word, counts, unigram_table)."""
+    """Load text8-style corpus.  Returns (token_ids, word2id, id2word, counts, noise_table)."""
     rng = np.random.default_rng(seed)
 
     with open(path, "r") as f:
@@ -62,11 +70,12 @@ def load_corpus(path, min_count=5, subsample_t=1e-5, seed=42):
     ids = subsample(ids, counts, t=subsample_t, rng=rng)
     print(f"After subsampling: {len(ids):,} tokens")
 
-    unigram_table = build_unigram_table(counts)
-    return ids, word2id, id2word, counts, unigram_table
+    noise_table = build_unigram_table(counts)
+    return ids, word2id, id2word, counts, noise_table
 
 
-# Numerics
+# ── Numerics ─────────────────────────────────────────────────────────────
+
 def sigmoid(x):
     """Numerically stable σ(x)."""
     pos = x >= 0
@@ -80,7 +89,8 @@ def log_sigmoid(x):
     return -np.logaddexp(0, -x)
 
 
-# Model
+# ── Model ────────────────────────────────────────────────────────────────
+
 def _scatter_add(ids, grads, d):
     """Sum per-example grads that share a row id.  Returns (unique_ids, summed_grads)."""
     unique = np.unique(ids)
@@ -124,24 +134,24 @@ class SGNS:
         tau = self.tau
 
         # ── forward ──
-        v_c = self.W_in[center]  # (B, d)
-        u_o = self.W_out[context]  # (B, d)
-        u_neg = self.W_out[negatives]  # (B, K, d)
+        v_c = self.W_in[center]                                      # (B, d)
+        u_o = self.W_out[context]                                    # (B, d)
+        u_neg = self.W_out[negatives]                                # (B, K, d)
 
-        pos_score = np.sum(v_c * u_o, axis=1) / tau  # (B,)
+        pos_score = np.sum(v_c * u_o, axis=1) / tau                 # (B,)
         neg_scores = np.sum(u_neg * v_c[:, None, :], axis=2) / tau  # (B, K)
 
         loss = (-log_sigmoid(pos_score) - log_sigmoid(-neg_scores).sum(axis=1)).mean()
 
-        # ── backward ──
+        # ── backward (sum gradient; mean loss is for logging only) ──
         # dL/ds_pos = σ(s) - 1,  dL/ds_neg_k = σ(s_k)
-        sig_pos = sigmoid(pos_score)  # (B,)
-        sig_neg = sigmoid(neg_scores)  # (B, K)
+        sig_pos = sigmoid(pos_score)     # (B,)
+        sig_neg = sigmoid(neg_scores)    # (B, K)
 
         g_vc = ((sig_pos - 1)[:, None] * u_o
-                + (sig_neg[:, :, None] * u_neg).sum(axis=1)) / (tau * B)  # (B, d)
-        g_uo = (sig_pos - 1)[:, None] * v_c / (tau * B)  # (B, d)
-        g_un = sig_neg[:, :, None] * v_c[:, None, :] / (tau * B)  # (B, K, d)
+                + (sig_neg[:, :, None] * u_neg).sum(axis=1)) / tau   # (B, d)
+        g_uo = (sig_pos - 1)[:, None] * v_c / tau                    # (B, d)
+        g_un = sig_neg[:, :, None] * v_c[:, None, :] / tau           # (B, K, d)
 
         np.clip(g_vc, -grad_clip, grad_clip, out=g_vc)
         np.clip(g_uo, -grad_clip, grad_clip, out=g_uo)
@@ -157,7 +167,8 @@ class SGNS:
         return loss, in_grad, out_grad
 
 
-# Optimizers
+# ── Optimizers ───────────────────────────────────────────────────────────
+
 class SGD:
     """SGD with linearly decaying learning rate."""
 
