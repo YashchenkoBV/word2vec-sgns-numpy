@@ -64,3 +64,43 @@ def load_corpus(path, min_count=5, subsample_t=1e-5, seed=42):
 
     noise_table = build_unigram_table(counts)
     return ids, word2id, id2word, counts, noise_table
+
+
+def log_sigmoid(x):
+    return -np.logaddexp(0, -x)
+
+
+class SGNS:
+    """Skip-gram with negative sampling, temperature-scaled scores."""
+
+    def __init__(self, V, d, tau=1.0, seed=42):
+        rng = np.random.default_rng(seed)
+        scale = 0.5 / d
+        self.W_in = rng.uniform(-scale, scale, (V, d))  # center embeddings
+        self.W_out = rng.uniform(-scale, scale, (V, d))  # context embeddings
+        self.tau = tau
+        self.V = V
+        self.d = d
+
+    def forward(self, center, context, negatives):
+        """Compute SGNS loss for a batch.
+
+        Args:
+            center:    (B,)    int array — center word ids
+            context:   (B,)    int array — true context word ids
+            negatives: (B, K)  int array — negative sample ids
+
+        Returns:
+            Scalar mean loss over the batch.
+        """
+        v_c = self.W_in[center]  # (B, d)
+        u_o = self.W_out[context]  # (B, d)
+        u_neg = self.W_out[negatives]  # (B, K, d)
+
+        # Temperature-scaled dot products.
+        pos_score = np.sum(v_c * u_o, axis=1) / self.tau  # (B,)
+        neg_scores = np.sum(u_neg * v_c[:, None, :], axis=2) / self.tau  # (B, K)
+
+        # L = -log σ(pos) - Σ log σ(-neg)
+        loss = -log_sigmoid(pos_score) - log_sigmoid(-neg_scores).sum(axis=1)
+        return loss.mean()
