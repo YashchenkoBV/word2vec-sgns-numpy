@@ -54,7 +54,7 @@ def sample_negatives(table, shape, rng):
 # ── Corpus loading ───────────────────────────────────────────────────────
 
 def load_corpus(path, min_count=5, subsample_t=1e-5, seed=42):
-    """Load text8-style corpus.  Returns (token_ids, word2id, id2word, counts, noise_table)."""
+    """Load text8-style corpus.  Returns (token_ids, word2id, id2word, counts, unigram_table)."""
     rng = np.random.default_rng(seed)
 
     with open(path, "r") as f:
@@ -70,8 +70,8 @@ def load_corpus(path, min_count=5, subsample_t=1e-5, seed=42):
     ids = subsample(ids, counts, t=subsample_t, rng=rng)
     print(f"After subsampling: {len(ids):,} tokens")
 
-    noise_table = build_unigram_table(counts)
-    return ids, word2id, id2word, counts, noise_table
+    unigram_table = build_unigram_table(counts)
+    return ids, word2id, id2word, counts, unigram_table
 
 
 # ── Numerics ─────────────────────────────────────────────────────────────

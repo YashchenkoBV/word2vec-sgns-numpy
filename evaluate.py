@@ -1,6 +1,7 @@
 """Evaluation script for word2vec embeddings."""
 
 import argparse
+import json
 import os
 import urllib.request
 import numpy as np
@@ -120,7 +121,7 @@ def eval_analogies(W_norm, word2id, categories):
 
 
 def print_analogy_results(results):
-    """Print per-category and aggregate analogy results."""
+    """Print per-category and aggregate analogy results.  Returns summary dict."""
     semantic_correct, semantic_total = 0, 0
     syntactic_correct, syntactic_total = 0, 0
 
@@ -144,6 +145,13 @@ def print_analogy_results(results):
     print(f"  {'Total':40s}  {total_c:>5}/{total_t:<5}  "
           f"{total_c / max(total_t, 1):.1%}")
 
+    return {
+        "semantic": semantic_correct / max(semantic_total, 1),
+        "syntactic": syntactic_correct / max(syntactic_total, 1),
+        "total": total_c / max(total_t, 1),
+        "per_category": {cat: acc for cat, (_, _, acc) in results.items()},
+    }
+
 
 def main():
     p = argparse.ArgumentParser(description="Evaluate word2vec embeddings")
@@ -154,6 +162,8 @@ def main():
     p.add_argument("--neighbors", type=str, nargs="*",
                    default=["king", "france", "computer", "good", "dog"])
     p.add_argument("--top-k", type=int, default=10)
+    p.add_argument("--output-json", type=str, default=None,
+                   help="Path to write evaluation results as JSON")
     args = p.parse_args()
 
     W, id2word, word2id = load_embeddings(args.checkpoint, use_both=args.use_both)
@@ -174,7 +184,13 @@ def main():
 
     print("\nAnalogy accuracy:")
     results = eval_analogies(W_norm, word2id, categories)
-    print_analogy_results(results)
+    summary = print_analogy_results(results)
+
+    if args.output_json:
+        os.makedirs(os.path.dirname(args.output_json) or ".", exist_ok=True)
+        with open(args.output_json, "w") as f:
+            json.dump(summary, f, indent=2)
+        print(f"\nSaved results to {args.output_json}")
 
 
 if __name__ == "__main__":

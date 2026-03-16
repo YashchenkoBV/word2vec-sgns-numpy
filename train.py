@@ -40,8 +40,8 @@ def generate_batches(corpus, window, neg_samples, unigram_table, batch_size, rng
 
 
 def estimate_total_steps(corpus_len, window, batch_size):
-    """Estimate steps per epoch.  Each center word produces ~window pairs on average."""
-    pairs_per_epoch = corpus_len * window  # E[window_size] = (1+W)/2, ×2 sides ≈ W
+    """Estimate steps per epoch.  E[pairs per position] = window + 1."""
+    pairs_per_epoch = corpus_len * (window + 1)
     return pairs_per_epoch // batch_size
 
 
@@ -61,6 +61,8 @@ def main():
     p.add_argument("--seed", type=int, default=42)
     p.add_argument("--log-every", type=int, default=10_000)
     p.add_argument("--save-dir", type=str, default="checkpoints")
+    p.add_argument("--loss-log", type=str, default=None,
+                   help="Path to write step,loss CSV for plotting")
     args = p.parse_args()
 
     rng = np.random.default_rng(args.seed)
@@ -92,6 +94,12 @@ def main():
     smoothed_loss = None
     alpha = 0.01  # EMA smoothing factor
 
+    loss_log_f = None
+    if args.loss_log:
+        os.makedirs(os.path.dirname(args.loss_log) or ".", exist_ok=True)
+        loss_log_f = open(args.loss_log, "w")
+        loss_log_f.write("step,loss\n")
+
     for epoch in range(1, args.epochs + 1):
         t0 = time.time()
         epoch_loss = 0.0
@@ -118,6 +126,9 @@ def main():
             if global_step % args.log_every == 0:
                 lr_now = opt.lr
                 print(f"  step {global_step:>8,}  loss {smoothed_loss:.4f}  lr {lr_now:.6f}")
+                if loss_log_f:
+                    loss_log_f.write(f"{global_step},{smoothed_loss:.6f}\n")
+                    loss_log_f.flush()
 
         dt = time.time() - t0
         avg = epoch_loss / max(epoch_steps, 1)
@@ -129,6 +140,9 @@ def main():
         np.savez(path, W_in=model.W_in, W_out=model.W_out,
                  id2word=np.array(id2word, dtype=object))
         print(f"  saved {path}")
+
+    if loss_log_f:
+        loss_log_f.close()
 
 
 if __name__ == "__main__":
