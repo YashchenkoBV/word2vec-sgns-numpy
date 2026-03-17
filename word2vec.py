@@ -3,7 +3,7 @@
 import numpy as np
 
 
-# ── Vocabulary ───────────────────────────────────────────────────────────
+# Vocabulary
 
 def build_vocab(tokens, min_count=5):
     """Return (word2id, id2word, counts) filtering words below min_count."""
@@ -23,7 +23,7 @@ def build_vocab(tokens, min_count=5):
     return word2id, id2word, counts
 
 
-# ── Subsampling ──────────────────────────────────────────────────────────
+# Subsampling
 
 def subsample(token_ids: np.ndarray, counts, t=1e-5, rng=None):
     """Probabilistically discard frequent words.  P(keep) = sqrt(t / f(w))."""
@@ -35,7 +35,7 @@ def subsample(token_ids: np.ndarray, counts, t=1e-5, rng=None):
     return token_ids[mask]
 
 
-# ── Noise distribution ───────────────────────────────────────────────────
+# Noise distribution
 
 def build_unigram_table(counts, exponent=0.75, table_size=10_000_000):
     """Flat lookup table for O(1) negative sampling.  p(w) ∝ count(w)^0.75."""
@@ -51,7 +51,7 @@ def sample_negatives(table, shape, rng):
     return table[rng.integers(0, len(table), size=shape)]
 
 
-# ── Corpus loading ───────────────────────────────────────────────────────
+# Corpus loading
 
 def load_corpus(path, min_count=5, subsample_t=1e-5, seed=42):
     """Load text8-style corpus.  Returns (token_ids, word2id, id2word, counts, unigram_table)."""
@@ -74,7 +74,7 @@ def load_corpus(path, min_count=5, subsample_t=1e-5, seed=42):
     return ids, word2id, id2word, counts, unigram_table
 
 
-# ── Numerics ─────────────────────────────────────────────────────────────
+# Numerics
 
 def sigmoid(x):
     """Numerically stable σ(x)."""
@@ -89,7 +89,7 @@ def log_sigmoid(x):
     return -np.logaddexp(0, -x)
 
 
-# ── Model ────────────────────────────────────────────────────────────────
+# Model
 
 def _scatter_add(ids, grads, d):
     """Sum per-example grads that share a row id.  Returns (unique_ids, summed_grads)."""
@@ -101,11 +101,7 @@ def _scatter_add(ids, grads, d):
 
 
 class SGNS:
-    """Skip-gram with negative sampling, temperature-scaled scores.
-
-    Loss for one (center, context, neg_1..neg_K) example:
-        L = -log σ(v_c · u_o / τ) - Σ_k log σ(-v_c · u_k / τ)
-    """
+    """Skip-gram with negative sampling, temperature-scaled scores."""
 
     def __init__(self, V, d, tau=1.0, seed=42):
         rng = np.random.default_rng(seed)
@@ -130,28 +126,27 @@ class SGNS:
             in_grad:  (unique_in_ids, grad_array)  — sparse gradient for W_in
             out_grad: (unique_out_ids, grad_array)  — sparse gradient for W_out
         """
-        B, K = negatives.shape
         tau = self.tau
 
         # ── forward ──
-        v_c = self.W_in[center]                                      # (B, d)
-        u_o = self.W_out[context]                                    # (B, d)
-        u_neg = self.W_out[negatives]                                # (B, K, d)
+        v_c = self.W_in[center]  # (B, d)
+        u_o = self.W_out[context]  # (B, d)
+        u_neg = self.W_out[negatives]  # (B, K, d)
 
-        pos_score = np.sum(v_c * u_o, axis=1) / tau                 # (B,)
+        pos_score = np.sum(v_c * u_o, axis=1) / tau  # (B,)
         neg_scores = np.sum(u_neg * v_c[:, None, :], axis=2) / tau  # (B, K)
 
         loss = (-log_sigmoid(pos_score) - log_sigmoid(-neg_scores).sum(axis=1)).mean()
 
         # ── backward (sum gradient; mean loss is for logging only) ──
         # dL/ds_pos = σ(s) - 1,  dL/ds_neg_k = σ(s_k)
-        sig_pos = sigmoid(pos_score)     # (B,)
-        sig_neg = sigmoid(neg_scores)    # (B, K)
+        sig_pos = sigmoid(pos_score)  # (B,)
+        sig_neg = sigmoid(neg_scores)  # (B, K)
 
         g_vc = ((sig_pos - 1)[:, None] * u_o
-                + (sig_neg[:, :, None] * u_neg).sum(axis=1)) / tau   # (B, d)
-        g_uo = (sig_pos - 1)[:, None] * v_c / tau                    # (B, d)
-        g_un = sig_neg[:, :, None] * v_c[:, None, :] / tau           # (B, K, d)
+                + (sig_neg[:, :, None] * u_neg).sum(axis=1)) / tau  # (B, d)
+        g_uo = (sig_pos - 1)[:, None] * v_c / tau  # (B, d)
+        g_un = sig_neg[:, :, None] * v_c[:, None, :] / tau  # (B, K, d)
 
         np.clip(g_vc, -grad_clip, grad_clip, out=g_vc)
         np.clip(g_uo, -grad_clip, grad_clip, out=g_uo)
@@ -167,7 +162,7 @@ class SGNS:
         return loss, in_grad, out_grad
 
 
-# ── Optimizers ───────────────────────────────────────────────────────────
+# Optimizers
 
 class SGD:
     """SGD with linearly decaying learning rate."""
